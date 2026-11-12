@@ -1,0 +1,17 @@
+# netlify.toml (mimiq-dashboard)
+# Version: 1.0
+# Last Updated: November 11, 2026
+# Replaces: none (new)
+# Purpose: MIMIQ dashboard project settings: no build step, pages served from public/, functions from netlify/functions/,
+#          never indexed, never framed.
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    X-Content-Type-Options = "nosniff"
