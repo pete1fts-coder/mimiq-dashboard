@@ -1,0 +1,662 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>MIMIQ Script Review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&family=Playfair+Display:wght@500;600&display=swap">
+<!--
+  GDA_MIMIQ_Script_Review_v1_0.html
+  Last Updated: November 11, 2026
+  Replaces: none (new). Builds on GDA_MIMIQ_Dashboard_Design_Preview_v1_0.html (October 11, 2026): same brand, layout and decision bar.
+  Purpose: Script Review screen of the MIMIQ dashboard (build guide N0c step 3). Read a script from the Script Writer (story
+           beats, shot direction, 20 hooks, caption), keep or change the hook, and Approve, Amend or Reject it.
+  Modes: CLIENT.api empty = demo on a saved copy of the sheet (nothing written); CLIENT.api set = live through the
+         Netlify function script-review.js, which checks each reviewer's own code.
+  SaaS: everything client-specific (name, wordmark, logo, colors, fonts, reviewers, words, limits) lives in CLIENT below.
+  UI library (pete-ui-library v1.1) parts used: tokens, primary button (loading > success, double-submit lock), tab bar
+  with sliding indicator (spring), skeleton screen, glass panel (decision bar, with solid fallback), password error shake
+  (reviewer code), row collapse (queue), toggle (demo control). Optimistic UI is NOT used for decisions: the library
+  rules it out for sign-off actions; the reviewer sees the sheet's real answer.
+-->
+<script>
+/* ======== CLIENT CONFIG: the only part that changes per client ======== */
+const CLIENT = {"id": "gda", "product": "MIMIQ", "name": "Glow District Aesthetics", "wordmark": "Glow District", "logo": "", "expert": "Brenda", "reviewers": ["Pete", "Brenda"], "hookMax": 42, "theme": {"bg": "#111111", "surface": "#1b1a18", "surface-2": "#262420", "border": "#2f2a20", "border-strong": "#4a3f27", "control-edge": "#8a7650", "text": "#faf8f3", "text-muted": "#d8d1c3", "text-subtle": "#aaa293", "accent": "#c9a050", "accent-light": "#e0c283", "accent-text": "#111111", "success": "#9ccaa5", "danger": "#eba69b", "danger-bg": "#5c1f1a", "focus": "#e0c283", "skeleton": "#262420", "skeleton-shine": "#3a362e", "font-display": "\"Playfair Display\", Georgia, \"Times New Roman\", serif", "font": "\"Jost\", system-ui, -apple-system, \"Segoe UI\", Roboto, Arial, sans-serif"}, "api": "/.netlify/functions/script-review", "demoReviewer": "Pete", "demoLatencyMs": 450};
+/* ===================================================================== */
+(function applyTheme(t) {
+  const r = document.documentElement.style;
+  Object.entries(t || {}).forEach(([k, v]) => r.setProperty('--ui-' + k, v));
+})(CLIENT.theme);
+</script>
+</head><body>
+<style>
+/* Tokens follow pete-ui-library names (--ui-*); values come from CLIENT.theme. Fallbacks here are neutral. */
+:root {
+  color-scheme: dark;
+  --ui-bg: #111; --ui-surface: #1b1a18; --ui-surface-2: #262420;
+  --ui-border: #2f2a20; --ui-border-strong: #4a3f27; --ui-control-edge: #8a7650;
+  --ui-text: #faf8f3; --ui-text-muted: #d8d1c3; --ui-text-subtle: #aaa293;
+  --ui-accent: #c9a050; --ui-accent-light: #e0c283; --ui-accent-text: #111;
+  --ui-success: #9ccaa5; --ui-danger: #eba69b; --ui-danger-bg: #5c1f1a;
+  --ui-focus: #e0c283; --ui-skeleton: #262420; --ui-skeleton-shine: #33302a;
+  --ui-font-display: Georgia, serif; --ui-font: system-ui, sans-serif;
+  --ui-radius-sm: 2px; --ui-radius-md: 2px;
+  --ui-text-md: 1.0625rem; --ui-text-sm: 0.9375rem; --ui-text-xs: 0.875rem;
+  --ui-target-min: 44px; --ui-control-h: 48px;
+  --ui-dur-instant: 100ms; --ui-dur-fast: 150ms; --ui-dur: 220ms; --ui-dur-slow: 320ms;
+  --ui-ease-out: cubic-bezier(.2, .8, .2, 1);
+  --gutter: 1rem;
+}
+@media (min-width: 60em) { :root { --gutter: 1.75rem; } }
+*, *::before, *::after { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body { margin: 0; background: var(--ui-bg); color: var(--ui-text); font-family: var(--ui-font); font-size: var(--ui-text-md); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p, ol, ul, dl, dd, figure, blockquote, fieldset { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+fieldset { border: 0; padding: 0; min-width: 0; }
+h2, h3, h4 { font-family: var(--ui-font-display); font-weight: 500; line-height: 1.2; text-wrap: balance; }
+button, textarea, input { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+a { color: var(--ui-accent-light); text-underline-offset: 0.18em; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------- Frame ---------- */
+.notice { background: var(--ui-surface-2); border-bottom: 1px solid var(--ui-border-strong); padding: 0.5rem var(--gutter); display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: center; justify-content: space-between; font-size: var(--ui-text-sm); color: var(--ui-text-muted); }
+.notice p { flex: 1 1 16rem; min-width: 0; }
+.notice .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1rem; }
+.masthead { display: flex; align-items: center; gap: 0.875rem; padding: 0.75rem var(--gutter); border-bottom: 1px solid var(--ui-border); }
+.wordmark { font-family: var(--ui-font-display); font-size: 1.25rem; color: var(--ui-accent); letter-spacing: 0.02em; white-space: nowrap; }
+.masthead img { height: 2.5rem; width: auto; display: block; }
+.masthead h1 { font-weight: 500; font-size: 1.0625rem; flex: 1; min-width: 0; color: var(--ui-text-muted); }
+.who { font-size: var(--ui-text-sm); color: var(--ui-text-muted); white-space: nowrap; display: flex; align-items: center; gap: 0.5rem; }
+.who b { color: var(--ui-text); font-weight: 500; }
+@media (max-width: 26em) { .masthead h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .masthead { justify-content: space-between; } }
+.shell { display: grid; grid-template-columns: minmax(0, 1fr); }
+.pane { min-width: 0; padding: 1.25rem var(--gutter) 2rem; }
+.shell[data-view="queue"] .review { display: none; }
+.shell[data-view="review"] .queue { display: none; }
+@media (min-width: 60em) {
+  .shell { grid-template-columns: 22rem minmax(0, 1fr); min-height: calc(100vh - 7rem); }
+  .shell[data-view] .queue { display: block; border-right: 1px solid var(--ui-border); }
+  .shell[data-view] .review { display: block; }
+  .back { display: none !important; }
+}
+
+/* ---------- Buttons (library: primary-button; brand radius) ---------- */
+.ui-btn { position: relative; isolation: isolate; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: var(--ui-control-h); min-width: var(--ui-target-min); padding: 0 1.25rem; border: 0; border-radius: var(--ui-radius-md); font-size: var(--ui-text-md); font-weight: 500; line-height: 1.1; white-space: nowrap; transition: transform var(--ui-dur-instant) var(--ui-ease-out), filter var(--ui-dur-fast) var(--ui-ease-out), background-color var(--ui-dur-fast) var(--ui-ease-out); -webkit-tap-highlight-color: transparent; }
+.ui-btn--primary { color: var(--ui-accent-text); font-weight: 600; background: linear-gradient(180deg, color-mix(in srgb, var(--ui-accent) 88%, #fff) 0%, var(--ui-accent) 55%, color-mix(in srgb, var(--ui-accent) 92%, #000) 100%); box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent), 0 1px 2px rgba(0,0,0,.4); }
+.ui-btn--primary::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, #fff 22%, transparent) 50%, transparent 70%); transform: translateX(-120%); }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) { .ui-btn--primary:not([aria-disabled="true"]):not(:disabled):hover::after { transform: translateX(120%); transition: transform 700ms var(--ui-ease-out); } }
+@media (hover: hover) { .ui-btn:not([aria-disabled="true"]):not(:disabled):hover { filter: brightness(1.07); } }
+.ui-btn--secondary { background: transparent; color: var(--ui-text); box-shadow: inset 0 0 0 1px var(--ui-control-edge); }
+@media (hover: hover) { .ui-btn--secondary:hover { box-shadow: inset 0 0 0 1px var(--ui-accent); } }
+.ui-btn--danger { background: var(--ui-danger-bg); color: var(--ui-text); box-shadow: inset 0 0 0 1px var(--ui-danger); }
+.ui-btn--quiet { background: transparent; color: var(--ui-accent-light); padding-inline: 0.5rem; }
+.ui-btn--small { min-height: var(--ui-target-min); font-size: var(--ui-text-sm); padding-inline: 0.875rem; }
+.ui-btn.is-pressed:not([aria-disabled="true"]):not(:disabled) { transform: scale(.97); filter: brightness(.95); }
+.ui-btn:disabled { cursor: not-allowed; opacity: .45; }
+.ui-btn[aria-busy="true"] { cursor: progress; }
+.ui-btn__label, .ui-btn__busy, .ui-btn__done { display: inline-flex; align-items: center; gap: 0.5rem; transition: opacity var(--ui-dur-fast) var(--ui-ease-out); }
+.ui-btn__busy, .ui-btn__done { position: absolute; inset: 0; justify-content: center; opacity: 0; }
+.ui-btn[data-state="loading"] .ui-btn__label, .ui-btn[data-state="success"] .ui-btn__label { opacity: 0; }
+.ui-btn[data-state="loading"] .ui-btn__busy, .ui-btn[data-state="success"] .ui-btn__done { opacity: 1; }
+.ui-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor; animation: ui-spin 700ms linear infinite; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+.ui-check path { stroke-dasharray: 24; stroke-dashoffset: 24; }
+.ui-btn[data-state="success"] .ui-check path { animation: ui-draw 260ms var(--ui-ease-out) 60ms forwards; }
+@keyframes ui-draw { to { stroke-dashoffset: 0; } }
+
+/* ---------- Switch (library: toggle, simplified for a demo control) ---------- */
+.switch { display: inline-flex; align-items: center; gap: 0.5rem; min-height: var(--ui-target-min); background: none; border: 0; padding: 0; color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+.switch .track { position: relative; width: 44px; height: 26px; border-radius: 13px; background: var(--ui-surface); box-shadow: inset 0 0 0 1px var(--ui-text-subtle); transition: background-color var(--ui-dur) var(--ui-ease-out); flex: none; }
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--ui-text); transition: transform var(--ui-dur) cubic-bezier(.34, 1.56, .64, 1); }
+.switch[aria-checked="true"] .track { background: var(--ui-danger-bg); box-shadow: inset 0 0 0 1px var(--ui-danger); }
+.switch[aria-checked="true"] .knob { transform: translateX(18px); }
+
+/* ---------- Tags ---------- */
+.tag { display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--ui-text-xs); line-height: 1.2; padding: 0.25rem 0.55rem; border: 1px solid var(--ui-border-strong); border-radius: 999px; color: var(--ui-text-muted); white-space: nowrap; }
+.tag.gold { color: var(--ui-accent-light); border-color: var(--ui-accent); }
+.tag.warn { color: var(--ui-danger); border-color: var(--ui-danger); }
+.tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+/* ---------- Queue ---------- */
+.queue h2 { font-size: 1.625rem; }
+.queue .sub { color: var(--ui-text-muted); font-size: var(--ui-text-sm); margin-top: 0.25rem; }
+.rows { margin-top: 1rem; display: flex; flex-direction: column; }
+.row-wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--ui-dur-slow) var(--ui-ease-out), opacity var(--ui-dur) var(--ui-ease-out); }
+.row-wrap > * { min-height: 0; overflow: hidden; }
+.row-wrap.is-gone { grid-template-rows: 0fr; opacity: 0; }
+.row { width: calc(100% + 1rem); margin-inline: -0.5rem; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--ui-border); padding: 0.875rem 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; min-height: 4.5rem; }
+.row:hover { background: var(--ui-surface); }
+.row[aria-current="true"] { background: var(--ui-surface); box-shadow: inset 2px 0 0 var(--ui-accent); }
+.row .t { font-family: var(--ui-font-display); font-size: 1.125rem; line-height: 1.3; }
+.row .m { color: var(--ui-text-subtle); font-size: var(--ui-text-xs); }
+.empty { border-top: 1px solid var(--ui-border); padding-block: 1.25rem; color: var(--ui-text-muted); }
+
+/* ---------- Skeleton (library: skeleton-screen) ---------- */
+.skel { position: relative; overflow: hidden; background: var(--ui-skeleton); border-radius: var(--ui-radius-sm); display: block; }
+.skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, var(--ui-skeleton-shine), transparent); animation: shimmer 1.4s ease-in-out infinite; }
+@keyframes shimmer { to { transform: translateX(100%); } }
+.skel-row { border-top: 1px solid var(--ui-border); padding: 0.875rem 0; display: grid; gap: 0.5rem; min-height: 4.5rem; }
+.fade-in { animation: fade var(--ui-dur) var(--ui-ease-out); }
+@keyframes fade { from { opacity: 0; } }
+
+/* ---------- Review ---------- */
+.review { padding-bottom: 0; }
+.back { margin: 0 0 0.75rem -0.5rem; }
+.head { display: flex; flex-direction: column; gap: 0.75rem; max-width: 46rem; }
+.head .kicker { font-size: var(--ui-text-xs); color: var(--ui-text-subtle); letter-spacing: 0.06em; text-transform: uppercase; }
+.head h2 { font-size: clamp(1.625rem, 1.3rem + 1.6vw, 2.25rem); }
+.head .topic { color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+
+/* Tab bar (library: tab-bar-sliding-pill; brand: a gold bar instead of a pill) */
+.tabbar { position: relative; display: flex; gap: 0.25rem; margin-top: 1.5rem; border-bottom: 1px solid var(--ui-border); max-width: 46rem; }
+.tabbar .bar { position: absolute; bottom: -1px; left: 0; height: 2px; width: 0; background: var(--ui-accent); pointer-events: none; will-change: transform, width; }
+.tab { flex: 0 1 auto; min-height: var(--ui-control-h); min-width: var(--ui-target-min); padding: 0 1rem; background: transparent; border: 0; color: var(--ui-text-subtle); font-weight: 500; transition: color var(--ui-dur-fast) var(--ui-ease-out); }
+.tab:hover { color: var(--ui-text); }
+.tab[aria-selected="true"] { color: var(--ui-text); transition-delay: 90ms; }
+.tab .n { font-variant-numeric: tabular-nums; color: var(--ui-text-subtle); font-weight: 400; margin-left: 0.25rem; }
+.panel { padding-top: 1.5rem; max-width: 46rem; }
+
+/* Story */
+.cast { font-size: var(--ui-text-sm); color: var(--ui-text-muted); border-left: 2px solid var(--ui-border-strong); padding: 0.25rem 0 0.25rem 0.75rem; margin-bottom: 1.25rem; }
+.cast b { color: var(--ui-text); font-weight: 500; }
+.beat { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: 0 0.75rem; padding-block: 1.25rem; border-top: 1px solid var(--ui-border); }
+.beat .num { font-family: var(--ui-font-display); font-size: 1.5rem; color: var(--ui-accent); line-height: 1.1; }
+.beat .body { display: flex; flex-direction: column; gap: 0.625rem; min-width: 0; }
+.beat .meta { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.beat h4 { font-size: 1.3125rem; }
+.beat .changed { font-family: var(--ui-font); font-size: var(--ui-text-xs); color: var(--ui-accent-light); margin-left: 0.5rem; white-space: nowrap; }
+.line { border-left: 2px solid var(--ui-accent); padding-left: 0.75rem; color: var(--ui-text); }
+.line .who { display: block; font-size: var(--ui-text-xs); color: var(--ui-text-subtle); margin-bottom: 0.15rem; }
+.beat .what { color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+.onslide { background: var(--ui-surface); padding: 0.625rem 0.75rem; font-size: var(--ui-text-sm); }
+.onslide .k { color: var(--ui-text-subtle); display: block; font-size: var(--ui-text-xs); }
+details.shot summary { min-height: var(--ui-target-min); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--ui-accent-light); font-weight: 500; font-size: var(--ui-text-sm); list-style: none; }
+details.shot summary::-webkit-details-marker { display: none; }
+details.shot summary::before { content: ""; width: 0.5rem; height: 0.5rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--ui-dur) var(--ui-ease-out); }
+details.shot[open] summary::before { transform: rotate(45deg); }
+details.shot dl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.625rem; padding: 0.25rem 0 0.5rem 1rem; border-left: 1px solid var(--ui-border); font-size: var(--ui-text-sm); }
+details.shot dt { color: var(--ui-text-subtle); font-size: var(--ui-text-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+details.shot dd { color: var(--ui-text-muted); }
+@media (min-width: 44em) { details.shot dl { grid-template-columns: 9rem minmax(0, 1fr); } }
+
+/* Hooks */
+.hooks-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1rem; color: var(--ui-text-muted); font-size: var(--ui-text-sm); margin-bottom: 0.75rem; }
+.hook { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: 0.75rem; align-items: start; padding: 0.75rem 0.5rem; margin-inline: -0.5rem; border-top: 1px solid var(--ui-border); cursor: pointer; min-height: var(--ui-target-min); transition: background-color var(--ui-dur-fast) var(--ui-ease-out); }
+.hook:hover { background: var(--ui-surface); }
+.hook.is-on { background: var(--ui-surface); box-shadow: inset 2px 0 0 var(--ui-accent); }
+.hook.is-off { cursor: not-allowed; }
+.hook.is-off .txt { color: var(--ui-text-subtle); }
+.hook input { appearance: none; width: 1.25rem; height: 1.25rem; margin: 0.15rem 0 0; border-radius: 50%; border: 1.5px solid var(--ui-text-subtle); display: grid; place-items: center; cursor: inherit; }
+.hook input::before { content: ""; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--ui-accent); transform: scale(0); transition: transform var(--ui-dur-fast) cubic-bezier(.34, 1.56, .64, 1); }
+.hook input:checked { border-color: var(--ui-accent); }
+.hook input:checked::before { transform: scale(1); }
+.hook input:disabled { border-style: dashed; }
+.hook .txt { font-family: var(--ui-font-display); font-size: 1.125rem; line-height: 1.3; display: block; }
+.hook .m { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin-top: 0.3rem; font-size: var(--ui-text-xs); color: var(--ui-text-subtle); }
+.hook .m .over { color: var(--ui-danger); }
+
+/* Caption */
+.caption { white-space: pre-wrap; overflow-wrap: anywhere; }
+.count-note { color: var(--ui-text-subtle); font-size: var(--ui-text-xs); margin-bottom: 0.75rem; }
+
+/* ---------- Decision bar (library: glass-panel, with solid fallback) ---------- */
+.decide { position: sticky; bottom: 0; z-index: 3; margin: 2rem calc(var(--gutter) * -1) 0; padding: 0.75rem var(--gutter) calc(0.75rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--ui-border-strong); background: color-mix(in srgb, var(--ui-surface) 82%, transparent); -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 -8px 24px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 0.5rem; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .decide { background: var(--ui-surface); } }
+@media (prefers-reduced-transparency: reduce) { .decide { background: var(--ui-surface); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+.decide .row2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+.decide .others { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.decide .approve { min-height: 3.25rem; font-size: 1.125rem; width: 100%; }
+.decide .hint { font-size: var(--ui-text-xs); color: var(--ui-text-muted); }
+.decide .hint b { color: var(--ui-accent-light); font-weight: 500; }
+.decide label { font-weight: 500; }
+.decide textarea { width: 100%; min-height: 6.5rem; padding: 0.75rem; resize: vertical; background: var(--ui-bg); border: 1px solid var(--ui-text-subtle); border-radius: var(--ui-radius-sm); font-size: var(--ui-text-md); line-height: 1.5; }
+.decide textarea::placeholder { color: var(--ui-text-subtle); opacity: 1; }
+.decide .pair { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.err { color: var(--ui-danger); font-size: var(--ui-text-sm); }
+.err::before { content: "! "; font-weight: 700; }
+@media (min-width: 44em) { .decide .row2 { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: stretch; } .decide .others .ui-btn { min-height: 3.25rem; } }
+
+/* ---------- Sign-in (library: login-form, password-error-shake) ---------- */
+.signin { max-width: 24rem; margin: 3rem auto; padding: 1.5rem; background: var(--ui-surface); border: 1px solid var(--ui-border-strong); display: flex; flex-direction: column; gap: 0.875rem; }
+.signin h2 { font-size: 1.5rem; }
+.signin p { color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+.field { display: flex; gap: 0.5rem; }
+.field input { flex: 1; min-width: 0; min-height: var(--ui-control-h); padding: 0 0.75rem; background: var(--ui-bg); border: 1px solid var(--ui-text-subtle); border-radius: var(--ui-radius-sm); font-size: 16px; }
+.field input[aria-invalid="true"] { border-color: var(--ui-danger); }
+.shake { animation: shake 360ms cubic-bezier(.36, .07, .19, .97); }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+
+/* ---------- Toast ---------- */
+#toast-slot { position: fixed; left: 50%; transform: translateX(-50%); top: calc(0.75rem + env(safe-area-inset-top, 0px)); z-index: 9; width: min(34rem, calc(100% - 2rem)); }
+.toast { background: var(--ui-text); color: var(--ui-bg); border-radius: var(--ui-radius-md); padding: 0.5rem 0.5rem 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; box-shadow: 0 0.75rem 2rem rgba(0,0,0,.6); animation: rise var(--ui-dur) var(--ui-ease-out); }
+.toast p { min-width: 0; font-weight: 500; }
+.toast .ui-btn--secondary { color: var(--ui-bg); box-shadow: inset 0 0 0 1px var(--ui-bg); }
+.toast.bad { background: var(--ui-danger-bg); color: var(--ui-text); }
+.toast.bad .ui-btn--secondary { color: var(--ui-text); box-shadow: inset 0 0 0 1px var(--ui-text); }
+@keyframes rise { from { opacity: 0; transform: translateY(-0.5rem); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+  .skel::after { display: none; }
+  .ui-spinner { border-style: dotted; border-color: currentColor; }
+  .ui-check path { stroke-dashoffset: 0; }
+  .ui-btn.is-pressed { transform: none !important; }
+}
+</style>
+
+<div id="app">
+  <div class="notice" id="notice" hidden></div>
+  <header class="masthead">
+    <span id="brand"></span>
+    <h1 id="screen-title">Script review</h1>
+    <span class="who" id="who"></span>
+  </header>
+  <main id="main"></main>
+</div>
+<div id="toast-slot" aria-live="polite"></div>
+<p class="vh" role="status" aria-live="polite" id="sr"></p>
+
+<script>
+const DEMO = null;
+
+/* ---------- tiny spring (pete-ui-library assets/spring.js v1.0, trimmed) ---------- */
+const UISpring = (function () {
+  const rq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function animate(o) {
+    let x = o.from, v = 0, target = o.to, raf = null, last = null, done = false;
+    const k = o.stiffness || 220, c = o.damping || 15;
+    const finish = () => { done = true; raf = null; x = target; o.onUpdate(x); };
+    function step(now) {
+      if (last == null) last = now;
+      const dt = Math.min((now - last) / 1000, 1 / 30); last = now;
+      for (let i = 0, h = dt / 4; i < 4; i++) { v += (-k * (x - target) - c * v) * h; x += v * h; }
+      if (Math.abs(v) < 1 && Math.abs(x - target) < 0.1) return finish();
+      o.onUpdate(x); raf = requestAnimationFrame(step);
+    }
+    if (rq.matches) setTimeout(finish, 0); else raf = requestAnimationFrame(step);
+    return { get isDone() { return done; }, retarget(t) { target = t; if (done) { done = false; last = null; raf = requestAnimationFrame(step); } }, stop() { if (raf) cancelAnimationFrame(raf); done = true; } };
+  }
+  return { animate, reduced: () => rq.matches };
+})();
+
+/* ---------- words ---------- */
+const W = Object.assign({
+  STAGE: { a_unaware: 'Unaware', b_problem_aware: 'Problem aware', c_comparing: 'Comparing' },
+  ROLE: { hook: 'Hook', story: 'Story', answer: 'Answer', closing: 'Closing' },
+  SPEAKER: { character: 'She says', narrator: 'Narrator', brenda: 'Expert' },
+  SHOT: [['shot_intent', 'Intent'], ['shot_subject_action', 'Subject and action'], ['shot_frame', 'Frame'], ['shot_optics', 'Optics'], ['shot_camera', 'Camera'], ['shot_performance', 'Performance'], ['shot_light_space', 'Light and space'], ['shot_continuity', 'Continuity'], ['shot_sound', 'Sound']],
+  ERR: {
+    stale: s => 'Someone already decided this script' + (s ? ' (it is now ' + s + ')' : '') + '. The queue is reloaded.',
+    busy: () => 'The sheet is busy. Try again in a moment.',
+    test_rows_only: () => 'Only test rows can be decided while MIMIQ is in test mode.',
+    undo_expired: () => 'Too late to undo. Ask for the row to be reset in the sheet.',
+    note_needed: () => 'Write what should change first.',
+    unauthorized: () => 'Your code was not accepted. Sign in again.',
+    demo_fail: () => 'Not saved: the sheet did not answer (a test failure you switched on). Nothing changed. Try again.',
+    _: () => 'Not saved: the sheet did not answer. Nothing changed. Try again.'
+  }
+}, CLIENT.words || {});
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nice = s => String(s || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+const words = s => String(s || '').trim().split(/\s+/).filter(Boolean).length;
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } };
+const wide = () => window.matchMedia('(min-width: 60em)').matches;
+const errText = e => (W.ERR[e && e.code] || W.ERR._)(e && e.status);
+const say = t => { const sr = document.getElementById('sr'); sr.textContent = ''; setTimeout(() => { sr.textContent = t; }, 30); };
+
+/* ---------- storage (per viewer convenience only; works without it) ---------- */
+const store = {
+  get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) {} }
+};
+
+/* ---------- API: live through the Netlify function, or demo in memory ---------- */
+let demoDb = null, failNext = false;
+const api = {
+  code: store.get('mimiq_code') || '',
+  async call(action, payload) {
+    if (!CLIENT.api) return demoCall(action, payload || {});
+    let res, data;
+    try {
+      res = await fetch(CLIENT.api, { method: 'POST', headers: { 'content-type': 'application/json', 'x-mimiq-reviewer': api.code }, body: JSON.stringify(Object.assign({ action }, payload)) });
+      data = await res.json();
+    } catch (e) { throw { code: 'network' }; }
+    if (res.status === 401) throw { code: 'unauthorized' };
+    if (!data.ok) throw { code: data.error, status: data.status };
+    return data;
+  }
+};
+function demoCall(action, p) {
+  return new Promise((resolve, reject) => setTimeout(() => {
+    const db = demoDb;
+    if (action === 'queue') return resolve({ ok: true, reviewer: CLIENT.demoReviewer, items: db.queue.filter(q => db.scripts[q.post_id].post.status === 'Script Review') });
+    if (action === 'script') return resolve(JSON.parse(JSON.stringify(db.scripts[p.post_id])));
+    if (failNext) return reject({ code: 'demo_fail' });
+    const s = db.scripts[p.post_id];
+    if (action === 'decide') {
+      if (s.post.status !== 'Script Review') return reject({ code: 'stale', status: s.post.status });
+      if (p.decision === 'amend' && !p.note) return reject({ code: 'note_needed' });
+      if (p.hook_n != null) { s.hooks.forEach(h => { h.picked = Number(h.n) === p.hook_n ? 'Y' : 'N'; }); s.slides[0].headline = s.hooks.find(h => Number(h.n) === p.hook_n).headline; }
+      s.post.status = { approve: 'Script Approved', amend: 'Script Amend Requested', reject: 'Script Rejected' }[p.decision];
+      return resolve({ ok: true, status: s.post.status });
+    }
+    if (action === 'reopen') { s.post.status = 'Script Review'; return resolve({ ok: true, status: 'Script Review' }); }
+  }, CLIENT.demoLatencyMs || 450));
+}
+
+/* ---------- state ---------- */
+let S = {};
+function reset() {
+  demoDb = DEMO ? JSON.parse(JSON.stringify(DEMO)) : null;
+  S = { queue: null, openId: null, script: null, tab: 'story', hookN: null, panel: null, reviewer: CLIENT.api ? store.get('mimiq_name') : CLIENT.demoReviewer, err: '' };
+}
+
+/* ---------- frame ---------- */
+function renderFrame() {
+  document.title = (CLIENT.product || 'MIMIQ') + ' Script Review';
+  document.getElementById('brand').innerHTML = CLIENT.logo ? '<img src="' + esc(CLIENT.logo) + '" alt="' + esc(CLIENT.name) + '">' : '<span class="wordmark">' + esc(CLIENT.wordmark || CLIENT.name) + '</span>';
+  const n = document.getElementById('notice');
+  if (!CLIENT.api) {
+    n.hidden = false;
+    n.innerHTML = '<p><strong>Demo</strong> on the sheet\'s script for ' + esc(DEMO.queue.map(q => q.post_id).join(', ')) + ', copied ' + esc(DEMO.as_of) + '. Nothing is written to the sheet.</p>' +
+      '<div class="ctl"><button type="button" class="switch" role="switch" aria-checked="' + failNext + '" id="fail"><span class="track"><span class="knob"></span></span>Make the next save fail</button>' +
+      '<button type="button" class="ui-btn ui-btn--secondary ui-btn--small" id="reset">Start over</button></div>';
+  }
+  document.getElementById('who').innerHTML = S.reviewer ? '<span>Reviewing as <b>' + esc(S.reviewer) + '</b></span>' + (CLIENT.api ? '<button type="button" class="ui-btn ui-btn--quiet ui-btn--small" id="signout">Sign out</button>' : '') : '';
+}
+
+/* ---------- sign-in (live only) ---------- */
+function renderSignin(errMsg) {
+  document.getElementById('main').innerHTML =
+    '<form class="signin" id="signin-form" novalidate><h2>Sign in to review</h2><p>Use the reviewer code you were given. It stays in this browser tab only.</p>' +
+    '<label for="code">Reviewer code</label><div class="field" id="code-field"><input id="code" name="password" type="password" autocomplete="current-password" required' + (errMsg ? ' aria-invalid="true" aria-describedby="code-err"' : '') + '>' +
+    '<button type="button" class="ui-btn ui-btn--secondary ui-btn--small" id="show" aria-pressed="false">Show</button></div>' +
+    (errMsg ? '<p class="err" id="code-err" role="alert">' + esc(errMsg) + '</p>' : '') +
+    '<button type="submit" class="ui-btn ui-btn--primary" id="signin-btn" data-state="idle"><span class="ui-btn__label">Sign in</span><span class="ui-btn__busy" aria-hidden="true"><span class="ui-spinner"></span>Checking</span><span class="ui-btn__done" aria-hidden="true">Signed in</span></button></form>';
+  const f = document.getElementById('code-field');
+  if (errMsg) { f.classList.remove('shake'); void f.offsetWidth; if (!UISpring.reduced()) f.classList.add('shake'); }
+  document.getElementById('code').focus();
+}
+
+/* ---------- main layout ---------- */
+function renderShell() {
+  document.getElementById('main').innerHTML =
+    '<div class="shell" id="shell" data-view="' + (S.openId && !wide() ? 'review' : 'queue') + '">' +
+      '<section class="pane queue" aria-labelledby="queue-title"><h2 id="queue-title">Scripts to review</h2><p class="sub" id="queue-sub"></p><div class="rows" id="rows" aria-busy="true"></div></section>' +
+      '<section class="pane review" id="review"></section>' +
+    '</div>';
+}
+function skelRows(n) { return Array.from({ length: n }, () => '<div class="skel-row" aria-hidden="true"><span class="skel" style="height:18px;width:85%"></span><span class="skel" style="height:12px;width:55%"></span><span class="skel" style="height:22px;width:40%"></span></div>').join(''); }
+
+function renderQueue() {
+  const rows = document.getElementById('rows'), sub = document.getElementById('queue-sub');
+  if (!rows) return;
+  if (S.queue == null) { sub.textContent = 'Loading…'; rows.innerHTML = skelRows(2); rows.setAttribute('aria-busy', 'true'); return; }
+  rows.setAttribute('aria-busy', 'false');
+  const n = S.queue.length;
+  sub.textContent = n === 0 ? 'Nothing waiting.' : (n === 1 ? '1 script is waiting for you.' : n + ' scripts are waiting for you.');
+  rows.innerHTML = n ? S.queue.map(q =>
+    '<div class="row-wrap" data-wrap="' + esc(q.post_id) + '"><div><button type="button" class="row fade-in" data-open="' + esc(q.post_id) + '"' + (q.post_id === S.openId ? ' aria-current="true"' : '') + '>' +
+      '<span class="t">' + esc(q.hook || q.post_id) + '</span>' +
+      '<span class="m">' + esc(q.post_id) + ', ' + esc(nice(q.surface)) + (q.slides ? ', ' + q.slides + ' slides' : '') + ', ' + esc(q.language) + '</span>' +
+      '<span class="tags"><span class="tag gold">' + esc(nice(q.pattern)) + '</span><span class="tag">' + esc(nice(q.mood)) + '</span>' + (q.pending_brenda ? '<span class="tag warn">Pending ' + esc(CLIENT.expert || 'expert') + '</span>' : '') + '</span>' +
+    '</button></div></div>').join('')
+    : '<p class="empty fade-in">' + esc(CLIENT.words && CLIENT.words.empty || 'No scripts are waiting. New scripts land here after the Script Writer runs.') + '</p>';
+}
+
+function renderReview() {
+  const el = document.getElementById('review'); if (!el) return;
+  if (!S.openId) { el.innerHTML = '<div class="head"><h2>' + (S.queue && S.queue.length ? 'Pick a script from the list' : 'All caught up') + '</h2><p class="topic">' + (S.queue && S.queue.length ? 'Its story, hooks and caption open here.' : 'Nothing to review right now.') + '</p></div>'; return; }
+  if (!S.script) {
+    el.setAttribute('aria-busy', 'true');
+    el.innerHTML = '<div class="head" aria-hidden="true"><span class="skel" style="height:12px;width:9rem"></span><span class="skel" style="height:34px;width:80%"></span><span class="skel" style="height:14px;width:60%"></span></div>' +
+      '<div class="tabbar" aria-hidden="true" style="border:0"><span class="skel" style="height:40px;width:18rem"></span></div><div class="panel" aria-hidden="true">' + skelRows(3) + '</div>';
+    return;
+  }
+  el.removeAttribute('aria-busy');
+  const sc = S.script, p = sc.post;
+  const judge = sc.hooks.find(h => h.picked === 'Y');
+  const pickN = S.hookN != null ? S.hookN : (judge ? Number(judge.n) : null);
+  const pick = sc.hooks.find(h => Number(h.n) === pickN);
+  const tabs = [['story', 'Story', sc.slides.length], ['hooks', 'Hooks', sc.hooks.length], ['caption', 'Caption', null]];
+  el.innerHTML =
+    '<button type="button" class="ui-btn ui-btn--quiet back" id="back">Back to the list</button>' +
+    '<div class="head fade-in"><span class="kicker">' + esc(p.post_id) + ' · ' + esc(nice(p.surface)) + ', ' + sc.slides.length + ' slides · ' + esc(p.language) + '</span>' +
+      '<h2 id="post-title" tabindex="-1">' + esc(pick ? pick.headline : sc.slides[0].headline) + '</h2>' +
+      '<p class="topic">' + esc(p.topic) + '</p>' +
+      '<div class="tags"><span class="tag gold">' + esc(nice(p.pattern)) + '</span><span class="tag">Angle: ' + esc(nice(p.angle)) + '</span><span class="tag">Mood: ' + esc(nice(p.mood)) + '</span><span class="tag">' + esc(W.STAGE[p.stage] || nice(p.stage)) + '</span><span class="tag">' + (p.service ? 'Service: ' + esc(p.service) : 'No service named') + '</span>' + (p.pending_brenda ? '<span class="tag warn">Pending ' + esc(CLIENT.expert || 'expert') + '</span>' : '') + '</div></div>' +
+    '<div class="tabbar" role="tablist" aria-label="Script parts" id="tabbar"><span class="bar" aria-hidden="true"></span>' +
+      tabs.map(([k, label, n]) => '<button type="button" class="tab" role="tab" id="tab-' + k + '" aria-controls="panel-' + k + '" aria-selected="' + (S.tab === k) + '" tabindex="' + (S.tab === k ? 0 : -1) + '">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>').join('') + '</div>' +
+    '<div class="panel" role="tabpanel" id="panel-story" aria-labelledby="tab-story"' + (S.tab === 'story' ? '' : ' hidden') + '>' + storyHtml(sc, pick, judge) + '</div>' +
+    '<div class="panel" role="tabpanel" id="panel-hooks" aria-labelledby="tab-hooks"' + (S.tab === 'hooks' ? '' : ' hidden') + '>' + hooksHtml(sc, pickN, judge) + '</div>' +
+    '<div class="panel" role="tabpanel" id="panel-caption" aria-labelledby="tab-caption"' + (S.tab === 'caption' ? '' : ' hidden') + '>' + captionHtml(sc) + '</div>' +
+    decisionHtml(p, pick, judge);
+  wireTabs();
+}
+
+function storyHtml(sc, pick, judge) {
+  const cast = sc.slides[0] && sc.slides[0].cast;
+  return (cast ? '<p class="cast"><b>Cast:</b> ' + esc(cast) + '</p>' : '') + sc.slides.map((s, i) => {
+    const head = i === 0 && pick ? pick.headline : s.headline;
+    const changed = i === 0 && pick && judge && pick.n !== judge.n;
+    const line = s.dialogue || s.narration;
+    const shot = W.SHOT.filter(([k]) => s[k]);
+    return '<article class="beat"><span class="num" aria-hidden="true">' + esc(s.n) + '</span><div class="body">' +
+      '<div class="meta"><span class="tag gold">' + esc(W.ROLE[s.role] || nice(s.role)) + '</span>' + (s.emotion ? '<span class="tag">' + esc(nice(s.emotion)) + '</span>' : '') + '</div>' +
+      '<h4><span class="vh">Slide ' + esc(s.n) + ': </span>' + esc(head) + (changed ? '<span class="changed">your hook</span>' : '') + '</h4>' +
+      (line ? '<blockquote class="line"><span class="who">' + esc(s.speaker === 'brenda' ? (CLIENT.expert || W.SPEAKER.brenda) : (W.SPEAKER[s.speaker] || nice(s.speaker))) + '</span>' + esc(line) + '</blockquote>' : '') +
+      (s.beat ? '<p class="what">' + esc(s.beat) + '</p>' : '') +
+      (s.on_slide_words ? '<p class="onslide"><span class="k">Fact on the slide</span>' + esc(s.on_slide_words) + (s.source_url ? ' <a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">' + esc(host(s.source_url)) + '<span class="vh"> (opens in a new tab)</span></a>' : '') + '</p>' : '') +
+      (shot.length ? '<details class="shot"><summary>Shot direction (' + shot.length + ' fields)</summary><dl>' + shot.map(([k, l]) => '<dt>' + l + '</dt><dd>' + esc(s[k]) + '</dd>').join('') + '</dl></details>' : '') +
+    '</div></article>';
+  }).join('');
+}
+
+function hooksHtml(sc, pickN, judge) {
+  const max = CLIENT.hookMax || 42;
+  return '<div class="hooks-head"><span>The pick goes on slide 1. Hooks over ' + max + ' characters do not fit the slide.</span>' + (judge ? '<span>Judge picked ' + esc(judge.n) + '</span>' : '') + '</div>' +
+    '<fieldset><legend class="vh">Pick the hook for slide 1</legend>' + sc.hooks.map(h => {
+      const len = h.headline.length, over = len > max, on = Number(h.n) === pickN;
+      return '<label class="hook' + (on ? ' is-on' : '') + (over ? ' is-off' : '') + '"><input type="radio" name="hook" value="' + esc(h.n) + '"' + (on ? ' checked' : '') + (over ? ' disabled aria-describedby="len-' + esc(h.n) + '"' : '') + '>' +
+        '<span><span class="txt">' + esc(h.headline) + '</span><span class="m"><span>' + esc(h.n) + '. ' + esc(nice(h.hook_method)) + '</span><span id="len-' + esc(h.n) + '"' + (over ? ' class="over"' : '') + '>' + len + ' characters' + (over ? ', too long for the slide' : '') + '</span>' + (judge && h.n === judge.n ? '<span>Judge\'s pick</span>' : '') + '</span></span></label>';
+    }).join('') + '</fieldset>';
+}
+
+function captionHtml(sc) {
+  return '<p class="count-note">' + words(sc.caption) + ' words · ' + sc.caption.length + ' characters · the last line is set by code</p><p class="caption">' + esc(sc.caption) + '</p>';
+}
+
+function btn(id, cls, label, busy, done) {
+  return '<button type="' + (id === 'approve' ? 'button' : 'submit') + '" class="ui-btn ' + cls + '" id="' + id + '" data-state="idle"><span class="ui-btn__label">' + label + '</span><span class="ui-btn__busy" aria-hidden="true"><span class="ui-spinner"></span>' + busy + '</span><span class="ui-btn__done" aria-hidden="true"><svg class="ui-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' + done + '</span></button>';
+}
+function decisionHtml(p, pick, judge) {
+  const err = S.err ? '<p class="err" role="alert">' + esc(S.err) + '</p>' : '';
+  if (p.status !== 'Script Review') return '<div class="decide"><p class="hint">This script is at ' + esc(p.status) + '. Nothing to decide.</p></div>';
+  if (S.panel === 'amend') return '<form class="decide" id="amend-form"><label for="note">What should change?</label><textarea id="note" placeholder="For example: slide 3 says the same thing as slide 2."></textarea>' + err + '<div class="pair">' + btn('amend-go', 'ui-btn--primary', 'Send for one rewrite', 'Sending', 'Sent') + '<button type="button" class="ui-btn ui-btn--secondary" data-panel="">Keep reviewing</button></div></form>';
+  if (S.panel === 'reject') return '<form class="decide" id="reject-form"><label for="note">Reject this script? WF2 will never draw it. The row stays in the sheet as Script Rejected.</label><textarea id="note" placeholder="Reason, if you want to leave one"></textarea>' + err + '<div class="pair">' + btn('reject-go', 'ui-btn--danger', 'Reject script', 'Saving', 'Rejected') + '<button type="button" class="ui-btn ui-btn--secondary" data-panel="">Keep reviewing</button></div></form>';
+  const mine = pick && judge && pick.n !== judge.n;
+  return '<div class="decide"><div class="row2">' + btn('approve', 'ui-btn--primary approve', 'Approve script', 'Saving', 'Approved') +
+    '<div class="others"><button type="button" class="ui-btn ui-btn--secondary" data-panel="amend">Amend</button><button type="button" class="ui-btn ui-btn--secondary" data-panel="reject">Reject</button></div></div>' + err +
+    '<p class="hint">' + (pick ? 'Approves with ' + (mine ? '<b>your hook ' + esc(pick.n) + '</b>' : 'the judge\'s hook ' + esc(pick.n)) + ' on slide 1. ' : '') + 'Undo stays open for 8 seconds after it saves.</p></div>';
+}
+
+/* ---------- tab bar with sliding indicator (library: tab-bar-sliding-pill) ---------- */
+let bar = { L: 0, R: 0, sL: null, sR: null };
+function wireTabs() {
+  const tb = document.getElementById('tabbar'); if (!tb) return;
+  const ind = tb.querySelector('.bar');
+  const sel = tb.querySelector('[aria-selected="true"]');
+  const edges = t => { const b = tb.getBoundingClientRect(), r = t.getBoundingClientRect(); return { l: r.left - b.left, r: r.right - b.left }; };
+  const draw = () => { ind.style.width = Math.max(0, bar.R - bar.L) + 'px'; ind.style.transform = 'translateX(' + bar.L + 'px)'; };
+  const e = edges(sel);
+  if (bar.R === 0 || !bar.moving) { bar.L = e.l; bar.R = e.r; draw(); }
+  bar.draw = draw; bar.edges = edges; bar.ind = ind;
+}
+function slideBar(toTab) {
+  const e = bar.edges(toTab), right = e.l > bar.L;
+  const go = (which, to, cfg) => UISpring.animate({ from: bar[which], to, stiffness: cfg[0], damping: cfg[1], onUpdate: v => { bar[which] = v; bar.draw(); } });
+  bar.moving = true;
+  // Leading edge first, trailing edge 70 ms later: the bar stretches toward the new tab, then shrinks to fit it.
+  go(right ? 'R' : 'L', right ? e.r : e.l, [380, 26]);
+  setTimeout(() => { go(right ? 'L' : 'R', right ? e.l : e.r, [260, 24]); setTimeout(() => { bar.moving = false; }, 600); }, UISpring.reduced() ? 0 : 70);
+}
+function selectTab(key, focus) {
+  if (S.tab === key) return;
+  S.tab = key;
+  document.querySelectorAll('#tabbar [role="tab"]').forEach(t => {
+    const on = t.id === 'tab-' + key;
+    t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
+    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    if (on) { if (focus) t.focus(); slideBar(t); }
+  });
+}
+
+/* ---------- button states (library: primary-button runAsync) ---------- */
+function runAsync(b, task) {
+  if (!b || b.getAttribute('aria-busy') === 'true') return Promise.resolve('ignored');
+  b.style.width = b.offsetWidth + 'px';
+  b.setAttribute('aria-busy', 'true'); b.setAttribute('aria-disabled', 'true'); b.dataset.state = 'loading';
+  say('Saving');
+  const unlock = () => { b.dataset.state = 'idle'; b.removeAttribute('aria-busy'); b.removeAttribute('aria-disabled'); b.style.width = ''; };
+  return task().then(r => { b.dataset.state = 'success'; return new Promise(res => setTimeout(() => res(r), UISpring.reduced() ? 300 : 900)); }, e => { unlock(); throw e; });
+}
+document.addEventListener('pointerdown', e => { const b = e.target.closest('.ui-btn'); if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') b.classList.add('is-pressed'); });
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => document.addEventListener(t, () => document.querySelectorAll('.ui-btn.is-pressed').forEach(b => b.classList.remove('is-pressed')), true));
+
+/* ---------- data flow ---------- */
+async function loadQueue() {
+  S.queue = null; renderQueue();
+  try {
+    const d = await api.call('queue');
+    if (d.reviewer) { S.reviewer = d.reviewer; store.set('mimiq_name', d.reviewer); renderFrame(); }
+    S.queue = d.items;
+    if (S.openId && !S.queue.find(q => q.post_id === S.openId)) S.openId = null;
+    if (!S.openId && S.queue.length && wide()) S.openId = S.queue[0].post_id;
+    renderQueue();
+    if (S.openId) openScript(S.openId); else renderReview();
+  } catch (e) { handleErr(e, true); }
+}
+async function openScript(id) {
+  S.openId = id; S.script = null; S.hookN = null; S.panel = null; S.err = ''; S.tab = 'story'; bar.R = 0;
+  document.getElementById('shell').dataset.view = 'review';
+  renderQueue(); renderReview();
+  try {
+    const d = await api.call('script', { post_id: id });
+    if (S.openId !== id) return;
+    S.script = d; renderReview();
+    if (!wide()) window.scrollTo(0, 0);
+  } catch (e) { handleErr(e); }
+}
+function handleErr(e, queueLevel) {
+  if (e && e.code === 'unauthorized') { api.code = ''; store.set('mimiq_code', null); S.reviewer = null; renderFrame(); renderSignin(errText(e)); return; }
+  toast(errText(e), null, true);
+  if (queueLevel) { S.queue = S.queue || []; renderQueue(); }
+}
+async function decide(kind) {
+  const p = S.script.post, judge = S.script.hooks.find(h => h.picked === 'Y');
+  const note = (document.getElementById('note') || {}).value || '';
+  if (kind === 'amend' && !note.trim()) { S.err = W.ERR.note_needed(); renderReview(); document.getElementById('note').focus(); return; }
+  const payload = { post_id: p.post_id, decision: kind, note: note.trim() };
+  if (S.hookN != null && (!judge || S.hookN !== Number(judge.n))) payload.hook_n = S.hookN;
+  const b = document.getElementById(kind === 'approve' ? 'approve' : kind + '-go');
+  S.err = '';
+  try {
+    const r = await runAsync(b, () => api.call('decide', payload));
+    const id = p.post_id;
+    say(id + ' ' + r.status);
+    // Row folds away and the rest glide up (library: row-delete-smooth-collapse), then the next script opens.
+    const wrap = document.querySelector('[data-wrap="' + CSS.escape(id) + '"]');
+    if (wrap) wrap.classList.add('is-gone');
+    setTimeout(() => {
+      S.queue = S.queue.filter(q => q.post_id !== id);
+      const next = S.queue[0];
+      S.openId = null; S.script = null;
+      renderQueue();
+      if (next && wide()) openScript(next.post_id); else { document.getElementById('shell').dataset.view = 'queue'; renderReview(); }
+      toast(id + ': ' + r.status + '.', () => undo(id));
+    }, UISpring.reduced() ? 0 : 320);
+  } catch (e) {
+    if (e && e.code === 'stale') { toast(errText(e), null, true); loadQueue(); return; }
+    if (e && e.code === 'unauthorized') return handleErr(e);
+    S.err = errText(e);
+    const keep = (document.getElementById('note') || {}).value;
+    renderReview();
+    const n = document.getElementById('note'); if (n && keep) n.value = keep;
+    const again = document.getElementById(kind === 'approve' ? 'approve' : kind + '-go'); if (again) again.focus();
+  }
+}
+async function undo(id) {
+  try { await api.call('reopen', { post_id: id }); toast(id + ' is back at Script Review.'); await loadQueue(); openScript(id); }
+  catch (e) { toast(errText(e), null, true); }
+}
+
+/* ---------- toast ---------- */
+let toastTimer;
+function toast(msg, undoFn, bad) {
+  clearTimeout(toastTimer);
+  const slot = document.getElementById('toast-slot');
+  slot.innerHTML = '<div class="toast' + (bad ? ' bad' : '') + '" role="' + (bad ? 'alert' : 'status') + '"><p>' + esc(msg) + '</p>' + (undoFn ? '<button type="button" class="ui-btn ui-btn--secondary ui-btn--small" id="undo">Undo</button>' : '<button type="button" class="ui-btn ui-btn--secondary ui-btn--small" id="toast-x">Close</button>') + '</div>';
+  if (undoFn) document.getElementById('undo').onclick = () => { slot.innerHTML = ''; undoFn(); };
+  else document.getElementById('toast-x').onclick = () => { slot.innerHTML = ''; };
+  if (!bad) toastTimer = setTimeout(() => { slot.innerHTML = ''; }, 8000);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.getAttribute('aria-disabled') === 'true') { e.preventDefault(); return; }
+  if (b.id === 'fail') { failNext = !failNext; b.setAttribute('aria-checked', failNext); return; }
+  if (b.id === 'reset') { reset(); boot(); return; }
+  if (b.id === 'signout') { api.code = ''; store.set('mimiq_code', null); store.set('mimiq_name', null); S.reviewer = null; renderFrame(); renderSignin(); return; }
+  if (b.id === 'show') { const i = document.getElementById('code'); const on = i.type === 'password'; i.type = on ? 'text' : 'password'; b.textContent = on ? 'Hide' : 'Show'; b.setAttribute('aria-pressed', on); return; }
+  if (b.dataset.open) { openScript(b.dataset.open); return; }
+  if (b.id === 'back') { document.getElementById('shell').dataset.view = 'queue'; S.openId = null; S.script = null; renderQueue(); renderReview(); return; }
+  if (b.getAttribute('role') === 'tab') { selectTab(b.id.slice(4), false); return; }
+  if ('panel' in b.dataset) { S.panel = b.dataset.panel || null; S.err = ''; renderReview(); const n = document.getElementById('note'); if (n) n.focus(); else document.getElementById('approve').focus(); return; }
+  if (b.id === 'approve') { decide('approve'); return; }
+});
+document.addEventListener('change', e => {
+  if (e.target.name === 'hook') {
+    S.hookN = Number(e.target.value);
+    document.querySelectorAll('.hook').forEach(l => l.classList.toggle('is-on', l.querySelector('input').checked));
+    const sc = S.script, pick = sc.hooks.find(h => Number(h.n) === S.hookN), judge = sc.hooks.find(h => h.picked === 'Y');
+    document.getElementById('post-title').textContent = pick.headline;
+    document.getElementById('panel-story').innerHTML = storyHtml(sc, pick, judge);
+    const old = document.querySelector('.decide'); if (old) old.outerHTML = decisionHtml(sc.post, pick, judge);
+    say('Hook ' + S.hookN + ' will go on slide 1 when you approve.');
+  }
+});
+document.addEventListener('submit', async e => {
+  e.preventDefault();
+  if (e.target.id === 'amend-form') return decide('amend');
+  if (e.target.id === 'reject-form') return decide('reject');
+  if (e.target.id === 'signin-form') {
+    const v = document.getElementById('code').value.trim();
+    if (!v) return renderSignin('Enter your reviewer code.');
+    api.code = v; store.set('mimiq_code', v);
+    const b = document.getElementById('signin-btn');
+    try { await runAsync(b, () => api.call('queue')); renderShell(); loadQueue(); }
+    catch (err) { api.code = ''; store.set('mimiq_code', null); renderSignin(err && err.code === 'unauthorized' ? 'That code was not accepted.' : errText(err)); }
+  }
+});
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (t.getAttribute && t.getAttribute('role') === 'tab') {
+    const tabs = [...document.querySelectorAll('#tabbar [role="tab"]')], i = tabs.indexOf(t);
+    let n = null;
+    if (e.key === 'ArrowRight') n = (i + 1) % tabs.length; else if (e.key === 'ArrowLeft') n = (i - 1 + tabs.length) % tabs.length; else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = tabs.length - 1;
+    if (n != null) { e.preventDefault(); selectTab(tabs[n].id.slice(4), true); }
+  }
+  if (e.key === 'Escape' && S.panel) { S.panel = null; S.err = ''; renderReview(); const a = document.getElementById('approve'); if (a) a.focus(); }
+});
+window.addEventListener('resize', () => { const tb = document.getElementById('tabbar'); if (tb && !bar.moving) { const s = tb.querySelector('[aria-selected="true"]'); const e = bar.edges(s); bar.L = e.l; bar.R = e.r; bar.draw(); } });
+
+function boot() {
+  renderFrame();
+  if (CLIENT.api && !api.code) return renderSignin();
+  renderShell(); loadQueue();
+}
+reset(); boot();
+</script>
+</body></html>
